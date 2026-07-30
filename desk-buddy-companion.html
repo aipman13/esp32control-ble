@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Desk Buddy — BLE Sync</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --card: #1a2233;
+    --card-border: #2a3550;
+    --text: #e8ecf4;
+    --muted: #8a94ab;
+    --accent: #5fd4c4;
+    --accent-dim: #2d6d64;
+    --danger: #e8677a;
+    --ok: #7fd88a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px;
+    max-width: 480px;
+    margin-inline: auto;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 0.95rem;
+    margin: 0 0 10px 0;
+    color: var(--accent);
+  }
+  label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  input[type="text"], input[type="password"], select {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: #10182a;
+    color: var(--text);
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #0a1512;
+  }
+  .btn-primary:disabled {
+    background: var(--accent-dim);
+    color: #6b7d78;
+    cursor: not-allowed;
+  }
+  .btn-secondary {
+    background: #26314a;
+    color: var(--text);
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--danger);
+    flex-shrink: 0;
+  }
+  .dot.connected { background: var(--ok); }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+  }
+  .checkbox-row input { width: auto; margin: 0; }
+  #log {
+    background: #0a0f1a;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 10px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 0.75rem;
+    height: 160px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: #9db3c9;
+  }
+  .warn {
+    background: #332a1a;
+    border: 1px solid #6b5730;
+    color: #e8c777;
+    border-radius: 10px;
+    padding: 10px;
+    font-size: 0.8rem;
+    margin-bottom: 14px;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+  <h1>🔵 Desk Buddy — BLE Sync</h1>
+  <div class="subtitle">Sinkronisasi waktu, cuaca &amp; lokasi ke Desk Buddy lewat Bluetooth — tanpa WiFi di firmware.</div>
+
+  <div class="warn">
+    Web Bluetooth cuma didukung <b>Chrome/Edge</b> (Android atau desktop).
+    <b>Safari di iPhone tidak mendukung ini</b> — pengguna iPhone perlu pakai
+    browser <a href="https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055" target="_blank">Bluefy</a> sebagai gantinya.
+  </div>
+
+  <div class="card">
+    <h2>1. Koneksi Bluetooth</h2>
+    <div class="status-row">
+      <div id="statusDot" class="dot"></div>
+      <span id="statusText">Belum terhubung</span>
+    </div>
+    <button id="btnConnect" class="btn-primary">Sambungkan ke Desk Buddy</button>
+  </div>
+
+  <div class="card">
+    <h2>2. Sinkronisasi</h2>
+    <div class="subtitle" style="margin:0 0 10px 0;">
+      Cuaca diambil dari <a href="https://open-meteo.com" target="_blank">Open-Meteo</a>
+      dan nama kota dari BigDataCloud — keduanya gratis, tanpa perlu daftar
+      atau API key apa pun.
+    </div>
+    <button id="btnSync" class="btn-primary" disabled>Sync Sekarang</button>
+    <div class="checkbox-row">
+      <input type="checkbox" id="autoSyncToggle">
+      <label for="autoSyncToggle" style="margin:0;">Auto-sync otomatis tiap</label>
+      <select id="autoSyncInterval" style="width:auto; margin:0;">
+        <option value="5">5 menit</option>
+        <option value="15" selected>15 menit</option>
+        <option value="30">30 menit</option>
+        <option value="60">60 menit</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Log</h2>
+    <div id="log"></div>
+  </div>
+
+<script>
+const SERVICE_UUID = '5f1d1000-8b2e-4c1a-9c2e-6f2b6a5d0001';
+const CHAR_UUID    = '5f1d1000-8b2e-4c1a-9c2e-6f2b6a5d0002';
+
+let bleDevice = null;
+let bleChar = null;
+let autoSyncTimer = null;
+
+const logEl = document.getElementById('log');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const btnConnect = document.getElementById('btnConnect');
+const btnSync = document.getElementById('btnSync');
+const autoSyncToggle = document.getElementById('autoSyncToggle');
+const autoSyncInterval = document.getElementById('autoSyncInterval');
+
+function log(msg) {
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent += `[${time}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setConnectedUI(connected) {
+  statusDot.classList.toggle('connected', connected);
+  statusText.textContent = connected ? `Terhubung ke ${bleDevice?.name || 'Desk Buddy'}` : 'Belum terhubung';
+  btnConnect.textContent = connected ? 'Putuskan Koneksi' : 'Sambungkan ke Desk Buddy';
+  btnSync.disabled = !connected;
+  if (!connected) {
+    autoSyncToggle.checked = false;
+    stopAutoSync();
+  }
+}
+
+async function connectBLE() {
+  if (bleDevice && bleDevice.gatt.connected) {
+    bleDevice.gatt.disconnect();
+    return;
+  }
+  if (!navigator.bluetooth) {
+    log('❌ Browser ini tidak mendukung Web Bluetooth. Pakai Chrome/Edge (Android/desktop), atau Bluefy di iPhone.');
+    return;
+  }
+  try {
+    log('Mencari perangkat Bluetooth...');
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }]
+    });
+    bleDevice.addEventListener('gattserverdisconnected', () => {
+      log('🔌 Bluetooth terputus.');
+      bleChar = null;
+      setConnectedUI(false);
+    });
+
+    log(`Menyambungkan ke ${bleDevice.name}...`);
+    const server = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    bleChar = await service.getCharacteristic(CHAR_UUID);
+
+    log('✅ Terhubung! Siap sinkronisasi.');
+    setConnectedUI(true);
+  } catch (e) {
+    log('❌ Gagal konek: ' + e.message);
+  }
+}
+
+function getLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocation tidak didukung browser ini'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      err => reject(new Error('Gagal ambil lokasi: ' + err.message)),
+      { enableHighAccuracy: false, timeout: 10000 }
+    );
+  });
+}
+
+async function reverseGeocode(lat, lon) {
+  // Layanan gratis, tidak butuh API key, cocok untuk sekadar cari nama kota.
+  const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=id`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Reverse geocode gagal: HTTP ' + res.status);
+  const data = await res.json();
+  return data.city || data.locality || data.principalSubdivision || 'Unknown';
+}
+
+// Tabel kode cuaca WMO milik Open-Meteo -> deskripsi singkat (dipangkas
+// biar muat di layar OLED 128x64 yang textSize(2)).
+const WMO_DESC = {
+  0: 'Clear', 1: 'Mostly Clear', 2: 'P.Cloudy', 3: 'Overcast',
+  45: 'Fog', 48: 'Fog',
+  51: 'Drizzle', 53: 'Drizzle', 55: 'Drizzle',
+  56: 'Fz Drizzle', 57: 'Fz Drizzle',
+  61: 'Light Rain', 63: 'Rain', 65: 'Heavy Rain',
+  66: 'Fz Rain', 67: 'Fz Rain',
+  71: 'Light Snow', 73: 'Snow', 75: 'Heavy Snow', 77: 'Snow',
+  80: 'Rain Showers', 81: 'Rain Showers', 82: 'Rain Showers',
+  85: 'Snow Showers', 86: 'Snow Showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm', 99: 'Thunderstorm'
+};
+
+async function fetchWeather(lat, lon) {
+  // Open-Meteo: gratis, tanpa API key, tanpa perlu daftar.
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+              `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Open-Meteo error: HTTP ' + res.status);
+  const data = await res.json();
+  const c = data.current || {};
+  return {
+    desc: WMO_DESC[c.weather_code] || '--',
+    temp: c.temperature_2m ?? 0,
+    feels_like: c.apparent_temperature ?? 0,
+    humidity: c.relative_humidity_2m ?? 0
+  };
+}
+
+async function syncNow() {
+  if (!bleChar) {
+    log('❌ Belum terhubung ke Desk Buddy.');
+    return;
+  }
+
+  btnSync.disabled = true;
+  try {
+    log('📍 Mengambil lokasi...');
+    const loc = await getLocation();
+
+    log('🏙️ Mencari nama kota...');
+    const city = await reverseGeocode(loc.lat, loc.lon);
+
+    log('☁️ Mengambil data cuaca (Open-Meteo)...');
+    const weather = await fetchWeather(loc.lat, loc.lon);
+
+    const payload = {
+      epoch: Math.floor(Date.now() / 1000),
+      utc_offset: -(new Date().getTimezoneOffset() * 60),
+      city: city,
+      weather: weather
+    };
+
+    const json = JSON.stringify(payload);
+    log('📤 Mengirim: ' + json);
+
+    const encoder = new TextEncoder();
+    await bleChar.writeValue(encoder.encode(json));
+
+    log(`✅ Sinkron berhasil! ${city}, ${weather.desc} ${weather.temp}°C`);
+  } catch (e) {
+    log('❌ Error: ' + e.message);
+  } finally {
+    btnSync.disabled = false;
+  }
+}
+
+function stopAutoSync() {
+  if (autoSyncTimer) {
+    clearInterval(autoSyncTimer);
+    autoSyncTimer = null;
+  }
+}
+
+autoSyncToggle.addEventListener('change', () => {
+  stopAutoSync();
+  if (autoSyncToggle.checked) {
+    const minutes = parseInt(autoSyncInterval.value, 10);
+    log(`⏱️ Auto-sync diaktifkan, tiap ${minutes} menit.`);
+    syncNow();
+    autoSyncTimer = setInterval(syncNow, minutes * 60 * 1000);
+  } else {
+    log('⏱️ Auto-sync dimatikan.');
+  }
+});
+
+autoSyncInterval.addEventListener('change', () => {
+  if (autoSyncToggle.checked) {
+    stopAutoSync();
+    const minutes = parseInt(autoSyncInterval.value, 10);
+    log(`⏱️ Interval auto-sync diubah ke ${minutes} menit.`);
+    autoSyncTimer = setInterval(syncNow, minutes * 60 * 1000);
+  }
+});
+
+btnConnect.addEventListener('click', connectBLE);
+btnSync.addEventListener('click', syncNow);
+
+log('Halaman siap. Klik "Sambungkan ke Desk Buddy" untuk mulai.');
+</script>
+</body>
+</html>
